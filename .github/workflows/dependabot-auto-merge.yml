@@ -1,0 +1,71 @@
+name: Auto Merge Dependabot PRs and Delete Old Branches
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+  workflow_dispatch: {}
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Auto merge
+        uses: actions/github-script@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo
+
+            const prs = await github.pulls.list({
+              owner,
+              repo,
+              state: 'open'
+            })
+
+            for (const pr of prs.data) {
+              if (pr.user.login === 'dependabot[bot]') {
+                try {
+                  await github.pulls.merge({
+                    owner,
+                    repo,
+                    pull_number: pr.number
+                  })
+                  console.log(`Merged PR #${pr.number}`)
+
+                  await github.git.deleteRef({
+                    owner,
+                    repo,
+                    ref: `heads/${pr.head.ref}`
+                  })
+                  console.log(`Deleted branch ${pr.head.ref}`)
+                } catch (error) {
+                  console.log(`Failed to merge and delete branch for PR #${pr.number}: ${error.message}`)
+                }
+              }
+            }
+
+            const branches = await github.repos.listBranches({
+              owner,
+              repo
+            })
+
+            for (const branch of branches.data) {
+              if (branch.name.startsWith('dependabot/')) {
+                try {
+                  await github.git.deleteRef({
+                    owner,
+                    repo,
+                    ref: `heads/${branch.name}`
+                  })
+                  console.log(`Deleted old branch ${branch.name}`)
+                } catch (error) {
+                  console.log(`Failed to delete old branch ${branch.name}: ${error.message}`)
+                }
+              }
+            }
